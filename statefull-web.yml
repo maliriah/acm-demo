@@ -1,0 +1,106 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stateful-web-pvc
+  labels:
+    app: stateful-web
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stateful-web-config
+  labels:
+    app: stateful-web
+data:
+  settings.json: |
+    {
+      "environment": "demo",
+      "persistence_enabled": true
+    }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stateful-web-secret
+  labels:
+    app: stateful-web
+type: Opaque
+data:
+  # "db-password-123" encoded in base64
+  DB_PASSWORD: ZGItcGFzc3dvcmQtMTIz
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stateful-web
+  labels:
+    app: stateful-web
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # Required for ReadWriteOnce PVCs during updates
+  selector:
+    matchLabels:
+      app: stateful-web
+  template:
+    metadata:
+      labels:
+        app: stateful-web
+    spec:
+      containers:
+        - name: web-server
+          image: nginxinc/nginx-unprivileged:latest
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: persistent-data
+              mountPath: /usr/share/nginx/html/data
+            - name: config-volume
+              mountPath: /etc/app/config
+            - name: secret-volume
+              mountPath: /etc/app/secrets
+              readOnly: true
+      volumes:
+        - name: persistent-data
+          persistentVolumeClaim:
+            claimName: stateful-web-pvc
+        - name: config-volume
+          configMap:
+            name: stateful-web-config
+        - name: secret-volume
+          secret:
+            secretName: stateful-web-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stateful-web-svc
+  labels:
+    app: stateful-web
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: stateful-web
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: stateful-web-route
+  labels:
+    app: stateful-web
+spec:
+  to:
+    kind: Service
+    name: stateful-web-svc
+  port:
+    targetPort: 8080
